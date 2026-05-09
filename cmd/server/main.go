@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+
+	"github.com/ngthdong/vpn/internal/proto"
 )
 
 func main() {
@@ -28,17 +30,29 @@ func main() {
 			continue
 		}
 
-		// Hex-dump the received data
-		fmt.Printf("\nReceived %d bytes from %s\n", n, remoteAddr)
-		fmt.Println(hex.Dump(buffer[:n]))
+		// Decode the proto.Packet
+		pkt, err := proto.Decode(buffer[:n])
+		if err != nil {
+			log.Printf("Decode error: %v", err)
+			continue
+		}
 
-		// Echo back to sender
-		_, err = conn.WriteTo(buffer[:n], remoteAddr)
+		fmt.Printf("\nReceived packet from %s: %v\n", remoteAddr, pkt)
+		fmt.Printf("Payload hex:\n%s", hex.Dump(pkt.Payload))
+
+		// Re-encode and echo back
+		encoded, err := proto.Encode(pkt)
+		if err != nil {
+			log.Printf("Encode error: %v", err)
+			continue
+		}
+
+		_, err = conn.WriteTo(encoded, remoteAddr)
 		if err != nil {
 			log.Printf("Write error: %v", err)
 			continue
 		}
 
-		log.Printf("Echoed %d bytes back to %s", n, remoteAddr)
+		log.Printf("Echoed packet (%d bytes encoded) back to %s", len(encoded), remoteAddr)
 	}
 }

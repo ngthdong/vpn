@@ -6,6 +6,8 @@ import (
 	"log"
 	"net"
 	"time"
+
+	"github.com/ngthdong/vpn/internal/proto"
 )
 
 func main() {
@@ -17,20 +19,31 @@ func main() {
 
 	log.Println("Connected to UDP server at localhost:9000")
 
-	// Test payload
+	// Create a proto.Packet with test payload
 	testPayload := []byte("hello vpn")
+	pkt := proto.Packet{
+		Type:    proto.TypeData,
+		Payload: testPayload,
+	}
 
-	// Write the payload
-	fmt.Printf("\n Sending %d bytes\n", len(testPayload))
-	fmt.Println(hex.Dump(testPayload))
+	// Encode the packet
+	encoded, err := proto.Encode(pkt)
+	if err != nil {
+		log.Fatalf("Encode failed: %v", err)
+	}
 
-	n, err := conn.Write(testPayload)
+	fmt.Printf("\nSending packet\n")
+	fmt.Printf("Type: 0x%02x, Payload: %s\n", pkt.Type, string(pkt.Payload))
+	fmt.Printf("Encoded (%d bytes):\n%s", len(encoded), hex.Dump(encoded))
+
+	// Send the encoded packet
+	n, err := conn.Write(encoded)
 	if err != nil {
 		log.Fatalf("Write failed: %v", err)
 	}
 
-	if n != len(testPayload) {
-		log.Fatalf("Write incomplete: wrote %d bytes, expected %d", n, len(testPayload))
+	if n != len(encoded) {
+		log.Fatalf("Write incomplete: wrote %d bytes, expected %d", n, len(encoded))
 	}
 
 	log.Printf("Sent %d bytes", n)
@@ -48,19 +61,26 @@ func main() {
 		log.Fatalf("Read failed: %v", err)
 	}
 
-	received := buffer[:n]
+	// Decode the response
+	receivedPkt, err := proto.Decode(buffer[:n])
+	if err != nil {
+		log.Fatalf("Decode failed: %v", err)
+	}
 
-	fmt.Printf("\nReceived %d bytes\n", n)
-	fmt.Println(hex.Dump(received))
+	fmt.Printf("\nReceived packet\n")
+	fmt.Printf("Type: 0x%02x, Payload: %s\n", receivedPkt.Type, string(receivedPkt.Payload))
+	fmt.Printf("Encoded (%d bytes):\n%s", n, hex.Dump(buffer[:n]))
 
 	// Assert they match byte-for-byte
-	if n != len(testPayload) {
-		log.Fatalf("Size mismatch: received %d bytes, sent %d bytes", n, len(testPayload))
+	if len(receivedPkt.Payload) != len(pkt.Payload) {
+		log.Fatalf("Payload size mismatch: received %d bytes, sent %d bytes", len(receivedPkt.Payload), len(pkt.Payload))
 	}
 
-	if string(received) != string(testPayload) {
-		log.Fatalf("Payload mismatch:\n  Sent:     %s\n  Received: %s", testPayload, received)
+	if string(receivedPkt.Payload) != string(pkt.Payload) {
+		log.Fatalf("Payload mismatch:\n  Sent:     %s\n  Received: %s", pkt.Payload, receivedPkt.Payload)
 	}
 
-	fmt.Println("\nEcho test passed: sent and received match!")
+	if receivedPkt.Type != pkt.Type {
+		log.Fatalf("Packet type mismatch: received 0x%02x, sent 0x%02x", receivedPkt.Type, pkt.Type)
+	}
 }
