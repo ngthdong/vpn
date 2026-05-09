@@ -23,7 +23,7 @@ var encodeDecodeTests = []struct {
 	},
 	{
 		name:    "large payload",
-		pkt:     Packet{Type: TypeHandshake, Payload: make([]byte, 10000)},
+		pkt:     Packet{Type: TypeHandshakeInit, Payload: make([]byte, 10000)},
 		wantErr: false,
 	},
 	{
@@ -131,7 +131,7 @@ func TestDecodeErrors(t *testing.T) {
 // Fuzz test
 func FuzzEncodeDecode(f *testing.F) {
 	f.Add(uint8(TypeData), []byte("test"))
-	f.Add(uint8(TypeHandshake), []byte{})
+	f.Add(uint8(TypeHandshakeInit), []byte{})
 	f.Add(uint8(TypeKeepAlive), make([]byte, 1000))
 
 	f.Fuzz(func(t *testing.T, typ uint8, payload []byte) {

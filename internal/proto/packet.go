@@ -19,10 +19,11 @@ const (
 	HeaderLen  = 7
 	PayloadLen = 65535
 
-	TypeData      uint8 = 0x01
-	TypeHandshake uint8 = 0x02
-	TypeKeepAlive uint8 = 0x03
-	TypeClose     uint8 = 0x04
+	TypeData          uint8 = 0x01
+	TypeHandshakeInit uint8 = 0x02
+	TypeHandshakeResp uint8 = 0x03
+	TypeKeepAlive     uint8 = 0x04
+	TypeClose         uint8 = 0x05
 )
 
 const Magic uint32 = 0x56504E21
@@ -53,7 +54,7 @@ func Decode(b []byte) (Packet, error) {
 	if binary.BigEndian.Uint32(b[0:4]) != Magic {
 		return Packet{}, errors.New("invalid magic bytes")
 	}
-	
+
 	pktType := b[4]
 	payloadLen := binary.BigEndian.Uint16(b[5:7])
 	if int(payloadLen) > len(b)-HeaderLen {
