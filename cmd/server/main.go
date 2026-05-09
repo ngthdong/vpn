@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 
+	"github.com/ngthdong/vpn/internal/handshake"
 	"github.com/ngthdong/vpn/internal/proto"
 )
 
@@ -37,22 +38,78 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("\nReceived packet from %s: %v\n", remoteAddr, pkt)
-		fmt.Printf("Payload hex:\n%s", hex.Dump(pkt.Payload))
+		fmt.Printf("\nReceived packet from %s: type=0x%02x, payload_len=%d\n", remoteAddr, pkt.Type, len(pkt.Payload))
 
-		// Re-encode and echo back
-		encoded, err := proto.Encode(pkt)
-		if err != nil {
-			log.Printf("Encode error: %v", err)
-			continue
+		// Handle different packet types
+		switch pkt.Type {
+		case proto.TypeHandshakeInit:
+			// SERVER HANDSHAKE FLOW
+			log.Println("Handling handshake init")
+
+			// Create new handshake instance for this client
+			hs, err := handshake.New()
+			if err != nil {
+				log.Printf("Failed to create handshake: %v", err)
+				continue
+			}
+
+			// Call HandleInit to derive shared keys and generate response
+			respPkt, err := hs.HandleInit(pkt)
+			if err != nil {
+				log.Printf("HandleInit error: %v", err)
+				continue
+			}
+
+			// Encode the response packet
+			encoded, err := proto.Encode(respPkt)
+			if err != nil {
+				log.Printf("Encode error: %v", err)
+				continue
+			}
+
+			fmt.Printf("\nSending HandshakeResp packet\n")
+			fmt.Printf("Type: 0x%02x, Payload length: %d bytes\n", respPkt.Type, len(respPkt.Payload))
+			fmt.Printf("Encoded (%d bytes):\n%s", len(encoded), hex.Dump(encoded))
+
+			// Send response back
+			_, err = conn.WriteTo(encoded, remoteAddr)
+			if err != nil {
+				log.Printf("Write error: %v", err)
+				continue
+			}
+
+			// Verify handshake is complete
+			if !hs.Done() {
+				log.Printf("Handshake not complete after HandleInit")
+				continue
+			}
+
+			// Print fingerprint
+			fmt.Printf("handshake complete, key fingerprint: %x\n", hs.SessionKeys.RecvKey[:8])
+			log.Println("Handshake complete")
+
+		case proto.TypeData:
+			// Data packet (not yet implemented for encryption)
+			fmt.Printf("Data packet: payload=%s\n", string(pkt.Payload))
+			fmt.Printf("Payload hex:\n%s", hex.Dump(pkt.Payload))
+
+			// Echo back for now
+			encoded, err := proto.Encode(pkt)
+			if err != nil {
+				log.Printf("Encode error: %v", err)
+				continue
+			}
+
+			_, err = conn.WriteTo(encoded, remoteAddr)
+			if err != nil {
+				log.Printf("Write error: %v", err)
+				continue
+			}
+
+			log.Printf("Echoed packet (%d bytes encoded) back to %s", len(encoded), remoteAddr)
+
+		default:
+			log.Printf("Unexpected packet type: 0x%02x", pkt.Type)
 		}
-
-		_, err = conn.WriteTo(encoded, remoteAddr)
-		if err != nil {
-			log.Printf("Write error: %v", err)
-			continue
-		}
-
-		log.Printf("Echoed packet (%d bytes encoded) back to %s", len(encoded), remoteAddr)
 	}
 }

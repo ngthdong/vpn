@@ -14,8 +14,8 @@ type SessionKeys struct {
 }
 
 func DeriveKeys(sharedSecret []byte, isInitiator bool) (SessionKeys, error) {
-	salt := []byte("vpn-salt-v1") // fixed, non-secret, domain-separating
-	h := hkdf.New(sha256.New, sharedSecret, salt, []byte(constant.Info))
+	salt := []byte(constant.HKDFSalt) // fixed, non-secret, domain-separating
+	h := hkdf.New(sha256.New, sharedSecret, salt, []byte(constant.HKDFInfo))
 
 	var keyMaterial [64]byte
 	if _, err := io.ReadFull(h, keyMaterial[:]); err != nil {

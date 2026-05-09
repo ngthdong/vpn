@@ -2,6 +2,8 @@ package crypto
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
+	"errors"
 
 	"github.com/ngthdong/vpn/internal/constant"
 	"golang.org/x/crypto/curve25519"
@@ -26,13 +28,23 @@ func GenerateKeypair() (Keypair, error) {
 	if err != nil {
 		return Keypair{}, err
 	}
-	
+
 	var kp Keypair
 	copy(kp.Private[:], priv[:])
 	copy(kp.Public[:], pub)
 	return kp, nil
 }
 
-func SharedSecret(localPriv, remotePub [constant.KeySize]byte) ([]byte, error) {
-	return curve25519.X25519(localPriv[:], remotePub[:])
+func SharedSecret(localPriv, remotePub [constant.KeySize]byte,) ([]byte, error) {
+	out, err := curve25519.X25519(localPriv[:], remotePub[:])
+	if err != nil {
+		return nil, err
+	}
+
+	var zeros [constant.KeySize]byte
+	if subtle.ConstantTimeCompare(out, zeros[:]) == 1 {
+		return nil, errors.New("degenerate shared secret: possible low-order point")
+	}
+
+	return out, nil
 }
