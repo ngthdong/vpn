@@ -2,9 +2,10 @@ package crypto
 
 import (
 	"crypto/cipher"
+	"encoding/binary"
 
-	"golang.org/x/crypto/chacha20poly1305"
 	"github.com/ngthdong/vpn/internal/constant"
+	"golang.org/x/crypto/chacha20poly1305"
 )
 
 type Cipher struct {
@@ -31,4 +32,12 @@ func (c *Cipher) Seal(plaintext, aad []byte) (nonce [constant.NonceSize]byte, ci
 
 func (c *Cipher) Open(nonce [constant.NonceSize]byte, ciphertext, aad []byte) ([]byte, error) {
 	return c.aead.Open(nil, nonce[:], ciphertext, aad)
+}
+
+// BuildAAD constructs Additional Authenticated Data from packet type and length
+func BuildAAD(pktType uint8, length uint16) []byte {
+	aad := make([]byte, 3)
+	aad[0] = pktType
+	binary.BigEndian.PutUint16(aad[1:3], length)
+	return aad
 }

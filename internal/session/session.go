@@ -44,12 +44,12 @@ func (s *Session) Encrypt(plaintext, aad []byte) (proto.Packet, error) {
 }
 
 func (s *Session) Decrypt(pkt proto.Packet, aad []byte) ([]byte, error) {
-	if len(pkt.Payload) < constant.NonceSize + constant.MinimumTagSize { 
+	if len(pkt.Payload) < constant.NonceSize + constant.TagSize { 
 		return nil, errors.New("packet too short to contain nonce and tag")
 	}
 
 	var nonce [constant.NonceSize]byte
-	copy(nonce[:], pkt.Payload[0:constant.NonceSize])
+	copy(nonce[:], pkt.Payload[:constant.NonceSize])
 	ct := pkt.Payload[constant.NonceSize:]
 
 	// Extract counter from nonce for replay check
