@@ -36,7 +36,7 @@ func (s *Session) Encrypt(plaintext, aad []byte) (proto.Packet, error) {
 		return proto.Packet{}, err
 	}
 
-	payload := make([]byte, constant.NonceSize + len(ct))
+	payload := make([]byte, constant.NonceSize+len(ct))
 	copy(payload[:constant.NonceSize], nonce[:])
 	copy(payload[constant.NonceSize:], ct)
 
@@ -44,7 +44,7 @@ func (s *Session) Encrypt(plaintext, aad []byte) (proto.Packet, error) {
 }
 
 func (s *Session) Decrypt(pkt proto.Packet, aad []byte) ([]byte, error) {
-	if len(pkt.Payload) < constant.NonceSize + constant.TagSize { 
+	if len(pkt.Payload) < constant.NonceSize+constant.TagSize {
 		return nil, errors.New("packet too short to contain nonce and tag")
 	}
 

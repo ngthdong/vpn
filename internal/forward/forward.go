@@ -113,23 +113,34 @@ func (f *Forwarder) tunnelToTUN(ctx context.Context) error {
 		// plaintext_len = payload_len - nonce_size - tag_size
 		plaintextLen := len(encPkt.Payload) - constant.NonceSize - constant.TagSize
 		aad := crypto.BuildAAD(encPkt.Type, uint16(plaintextLen))
-		plaintext, err := f.session.Decrypt(encPkt, aad)
-		if err != nil {
-			log.Printf("decrypt failed, dropping: %v", err)
+
+		switch encPkt.Type {
+		case proto.TypeKeepAlive: 
+			_, err := f.session.Decrypt(encPkt, aad)
+			if err != nil {
+				log.Printf("keepalive decrypt failed: %v", err)
+			}
 			continue
-		}
+		
+		case proto.TypeData:
+			plaintext, err := f.session.Decrypt(encPkt, aad)
+			if err != nil {
+				log.Printf("decrypt failed, dropping: %v", err)
+				continue
+			}
 
-		hdr, err := tun.ParseIPHeader(plaintext)
-		if err != nil {
-			log.Printf("bad decrypted IP header, dropping: %v", err)
-			continue
-		}
+			hdr, err := tun.ParseIPHeader(plaintext)
+			if err != nil {
+				log.Printf("bad decrypted IP header, dropping: %v", err)
+				continue
+			}
 
-		log.Printf("tunnel -> tun: %s → %s proto=%d len=%d",
-			hdr.SrcIP, hdr.DstIP, hdr.Proto, len(plaintext))
+			log.Printf("tunnel -> tun: %s -> %s proto=%d len=%d",
+				hdr.SrcIP, hdr.DstIP, hdr.Proto, len(plaintext))
 
-		if _, err := f.tun.Write(plaintext); err != nil {
-			return fmt.Errorf("tun write: %w", err)
+			if _, err := f.tun.Write(plaintext); err != nil {
+				return fmt.Errorf("tun write: %w", err)
+			}
 		}
 	}
 }

@@ -19,7 +19,7 @@ func TestSessionRoundtrip(t *testing.T) {
 	bob, _ := NewSession(bobKeys)
 
 	plaintext := []byte("this is a secret IP packet")
-	aad := []byte{0x56, 0x50, 0x4E, 0x21, 0x01, 0x00, 0x1A} // fake header
+	aad := crypto.BuildAAD(0x01, uint16(len(plaintext)))
 
 	// Alice encrypts
 	pkt, err := alice.Encrypt(plaintext, aad)
@@ -46,8 +46,9 @@ func TestTamperDetection(t *testing.T) {
 	alice, _ := NewSession(aliceKeys)
 	bob, _ := NewSession(bobKeys)
 
-	aad := []byte{0x56, 0x50, 0x4E, 0x21, 0x01, 0x00, 0x05}
-	pkt, _ := alice.Encrypt([]byte("hello"), aad)
+	plaintext := []byte("hello")
+	aad := crypto.BuildAAD(0x01, uint16(len(plaintext)))
+	pkt, _ := alice.Encrypt(plaintext, aad)
 
 	// Flip one bit in the ciphertext
 	pkt.Payload[20] ^= 0xFF

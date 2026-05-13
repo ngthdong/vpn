@@ -29,7 +29,7 @@ type ifReq struct {
 }
 
 type Device struct {
-	fd   *os.File
+	FD   *os.File
 	name string
 	mtu  int
 }
@@ -57,7 +57,7 @@ func Open(name string, mtu int) (*Device, error) {
 		return nil, fmt.Errorf("TUNSETIFF: %w", errno)
 	}
 
-	dev := &Device{fd: fd, name: name, mtu: mtu}
+	dev := &Device{FD: fd, name: name, mtu: mtu}
 	if err := dev.configure(); err != nil {
 		fd.Close()
 		
@@ -84,15 +84,15 @@ func (d *Device) configure() error {
 }
 
 func (d *Device) Read(buf []byte) (int, error)  {
-	return d.fd.Read(buf) 
+	return d.FD.Read(buf) 
 }
 
 func (d *Device) Write(buf []byte) (int, error) { 
-	return d.fd.Write(buf) 
+	return d.FD.Write(buf) 
 }
 
 func (d *Device) Close() error { 
-	return d.fd.Close() 
+	return d.FD.Close() 
 }
 
 func (d *Device) Name() string { 

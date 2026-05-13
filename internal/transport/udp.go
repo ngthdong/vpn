@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/ngthdong/vpn/internal/constant"
 	"github.com/ngthdong/vpn/internal/proto"
 )
 
-const MTU_SIZE = 1400
-
 type UDPTransport struct {
 	conn   net.PacketConn
-	buffer [MTU_SIZE]byte // MTU-sized buffer
+	buffer [constant.MTU]byte // MTU-sized buffer
 }
 
 func NewUDPTransport(conn net.PacketConn) *UDPTransport {
