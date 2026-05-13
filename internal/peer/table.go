@@ -47,7 +47,7 @@ func (t *PeerTable) LookupID(id PeerID) (*Peer, bool) {
 func (t *PeerTable) Evict(p *Peer) {
 	t.mu.Lock()
 	delete(t.byAddr, p.Addr.String())
-	delete(t.byID, p.id)
+	delete(t.byID, p.ID)
 	t.mu.Unlock()
 
 	p.Close()

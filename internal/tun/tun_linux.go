@@ -83,12 +83,12 @@ func (d *Device) configure() error {
 	return nil
 }
 
-func (d *Device) Read(buf []byte) (int, error)  {
-	return d.FD.Read(buf) 
+func (d *Device) Read(buf []byte) (int, error) {
+	return unix.Read(int(d.FD.Fd()), buf)
 }
 
-func (d *Device) Write(buf []byte) (int, error) { 
-	return d.FD.Write(buf) 
+func (d *Device) Write(buf []byte) (int, error) {
+	return unix.Write(int(d.FD.Fd()), buf)
 }
 
 func (d *Device) Close() error { 

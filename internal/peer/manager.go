@@ -13,7 +13,7 @@ import (
 
 const (
 	keepaliveInterval = 5 * time.Second
-	idleTimeout       = 30 * time.Second
+	idleTimeout       = 120 * time.Second
 )
 
 type Manager struct {

@@ -2,6 +2,7 @@ package peer
 
 import (
 	"context"
+	"encoding/hex"
 	"net"
 	"sync"
 	"time"
@@ -21,7 +22,7 @@ const (
 
 type Peer struct {
 	mu        sync.RWMutex
-	id        PeerID   // derived from remote public key
+	ID        PeerID   // derived from remote public key
 	Addr      net.Addr // remote UDP address
 	state     State
 	session   *session.Session
@@ -58,7 +59,7 @@ func (p *Peer) LastSeen() time.Time {
 func (p *Peer) SetSession(s *session.Session, id PeerID) {
 	p.mu.Lock()
 	p.session = s
-	p.id = id
+	p.ID = id
 	p.state = StateEstablished
 	p.mu.Unlock()
 }
@@ -78,4 +79,8 @@ func (p *Peer) Close() {
 	p.mu.Unlock()
 	p.cancel()
 	<-p.Done
+}
+
+func (id PeerID) String() string {
+	return hex.EncodeToString(id[:8])
 }

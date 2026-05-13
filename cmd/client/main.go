@@ -5,24 +5,30 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/ngthdong/vpn/internal/constant"
+	"github.com/ngthdong/vpn/internal/event"
 	"github.com/ngthdong/vpn/internal/forward"
 	"github.com/ngthdong/vpn/internal/handshake"
+	"github.com/ngthdong/vpn/internal/nat"
+	"github.com/ngthdong/vpn/internal/peer"
 	"github.com/ngthdong/vpn/internal/proto"
+	"github.com/ngthdong/vpn/internal/router"
 	"github.com/ngthdong/vpn/internal/session"
 	"github.com/ngthdong/vpn/internal/transport"
 	"github.com/ngthdong/vpn/internal/tun"
 )
 
-func handleHandshake(conn net.PacketConn, serverAddr *net.UDPAddr, hs *handshake.Handshake) (*session.Session, error) {
+func handleHandshake(
+	conn net.PacketConn,
+	serverAddr *net.UDPAddr,
+	hs *handshake.Handshake,
+) (*session.Session, error) {
 	buffer := make([]byte, constant.MTU)
 
-	// Generate InitPacket
 	initPkt, err := hs.InitPacket()
 	if err != nil {
 		return nil, err
@@ -33,15 +39,15 @@ func handleHandshake(conn net.PacketConn, serverAddr *net.UDPAddr, hs *handshake
 		return nil, err
 	}
 
-	fmt.Printf("Sending HandshakeInit packet\n")
+	log.Println("sending handshake init")
 
-	_, err = conn.WriteTo(encoded, serverAddr)
-	if err != nil {
+	if _, err := conn.WriteTo(encoded, serverAddr); err != nil {
 		return nil, err
 	}
 
-	err = conn.SetReadDeadline(time.Time{})
-	if err != nil {
+	if err := conn.SetReadDeadline(
+		time.Now().Add(5 * time.Second),
+	); err != nil {
 		return nil, err
 	}
 
@@ -62,8 +68,7 @@ func handleHandshake(conn net.PacketConn, serverAddr *net.UDPAddr, hs *handshake
 		return nil, fmt.Errorf("invalid handshake response")
 	}
 
-	err = hs.HandleResp(respPkt)
-	if err != nil {
+	if err := hs.HandleResp(respPkt); err != nil {
 		return nil, err
 	}
 
@@ -79,26 +84,38 @@ func handleHandshake(conn net.PacketConn, serverAddr *net.UDPAddr, hs *handshake
 	return sess, nil
 }
 
-func runForwarder(
-	ctx context.Context,
-	tunDev *tun.Device,
-	sess *session.Session,
-	udpTransport *transport.UDPTransport,
-	serverAddr net.Addr,
-) error {
-	fwd := forward.NewForwarder(tunDev, sess, udpTransport, serverAddr)
-	return fwd.Run(ctx)
-}
-
 func main() {
+	ctx, cancel := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
+	defer cancel()
+
+	// Independent subsystems
+	bus := event.NewBus(256)
+	rt := &router.Router{}
+	natTable := nat.NewTable(5 * time.Minute)
+	table := peer.NewPeerTable()
+
+	// UDP transport
 	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		log.Fatalf("failed to listen udp: %v", err)
 	}
 	defer conn.Close()
 
-	serverAddr, _ := net.ResolveUDPAddr("udp", "localhost:9000")
+	serverAddr, err := net.ResolveUDPAddr(
+		"udp",
+		"127.0.0.1:9000",
+	)
+	if err != nil {
+		log.Fatalf("resolve udp addr failed: %v", err)
+	}
 
+	udp := transport.NewUDPTransport(conn)
+
+	// Handshake
 	hs, err := handshake.New()
 	if err != nil {
 		log.Fatalf("handshake init failed: %v", err)
@@ -109,29 +126,54 @@ func main() {
 		log.Fatalf("handshake failed: %v", err)
 	}
 
-	log.Println("Handshake successful")
+	log.Println("handshake successful")
 
+	// TUN device
 	tunDev, err := tun.Open("tun1", constant.MaxPacketSize)
 	if err != nil {
 		log.Fatalf("tun open failed: %v", err)
 	}
 	defer tunDev.Close()
 
-	udpTransport := transport.NewUDPTransport(conn)
-	defer udpTransport.Close()
+	log.Printf(
+		"TUN device %s opened, MTU=%d",
+		tunDev.Name(),
+		tunDev.MTU(),
+	)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Create peer representing server
+	serverPeer := peer.NewPeer(serverAddr, func() {})
+	serverPeer.SetSession(
+		sess,
+		peer.PeerID{},
+	)
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	table.Add(serverPeer)
+
+	// Add default route through server
+	_, defaultRoute, _ := net.ParseCIDR("0.0.0.0/0")
+	rt.Add(defaultRoute, serverPeer, 100)
+
+	// Data plane
+	fwd := forward.NewForwarder(
+		tunDev,
+		udp,
+		table,
+		rt,
+		natTable,
+		bus,
+		net.ParseIP("10.0.0.2"), 
+	)
 
 	go func() {
-		<-sigChan
-		cancel()
+		if err := fwd.Run(ctx); err != nil &&
+			err != context.Canceled {
+			log.Printf("forwarder error: %v", err)
+			cancel()
+		}
 	}()
 
-	if err := runForwarder(ctx, tunDev, sess, udpTransport, serverAddr); err != nil && err != context.Canceled {
-		log.Fatalf("forwarder error: %v", err)
-	}
+	<-ctx.Done()
+
+	log.Println("client shutdown")
 }

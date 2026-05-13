@@ -3,6 +3,7 @@ package transport
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/ngthdong/vpn/internal/constant"
 	"github.com/ngthdong/vpn/internal/proto"
@@ -51,4 +52,8 @@ func (t *UDPTransport) WritePacket(pkt proto.Packet, addr net.Addr) error {
 
 func (t *UDPTransport) Close() error {
 	return t.conn.Close()
+}
+
+func (t *UDPTransport) SetReadDeadline(deadline time.Time) error {
+	return t.conn.SetReadDeadline(deadline)
 }

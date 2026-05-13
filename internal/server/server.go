@@ -4,24 +4,25 @@ import (
 	"context"
 	"log"
 	"net"
-	"os"
-	"time"
 
-	"github.com/ngthdong/vpn/internal/constant"
-	"github.com/ngthdong/vpn/internal/crypto"
 	"github.com/ngthdong/vpn/internal/handshake"
 	"github.com/ngthdong/vpn/internal/peer"
 	"github.com/ngthdong/vpn/internal/proto"
+	"github.com/ngthdong/vpn/internal/router"
 	"github.com/ngthdong/vpn/internal/session"
 	"github.com/ngthdong/vpn/internal/transport"
-	"github.com/ngthdong/vpn/internal/tun"
 )
 
+type PacketHandler interface {
+	HandlePacket(proto.Packet, net.Addr)
+}
+
 type Server struct {
-	UDP     *transport.UDPTransport
-	TUN     *tun.Device
-	Table   *peer.PeerTable
-	Manager *peer.Manager
+	UDP       *transport.UDPTransport
+	Table     *peer.PeerTable
+	Manager   *peer.Manager
+	Forwarder PacketHandler
+	Router    *router.Router
 }
 
 func (s *Server) Run(ctx context.Context) error {
@@ -30,36 +31,50 @@ func (s *Server) Run(ctx context.Context) error {
 	for {
 		pkt, addr, err := s.UDP.ReadPacket()
 		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+					continue
+				}
 			}
-			log.Printf("udp read error: %v", err)
+
+			log.Printf("udp read failed: %v", err)
 			continue
 		}
 
 		switch pkt.Type {
 		case proto.TypeHandshakeInit:
 			s.handleHandshakeInit(ctx, pkt, addr)
-		case proto.TypeData:
-			s.handleData(pkt, addr)
+
 		case proto.TypeKeepAlive:
 			s.handleKeepalive(addr)
+
 		case proto.TypeClose:
 			s.handleClose(addr)
-		default:
-			log.Printf("unknown packet type 0x%02x from %s, dropping", pkt.Type, addr)
+
+		case proto.TypeData:
+			s.Forwarder.HandlePacket(pkt, addr)
 		}
 	}
 }
 
-func (s *Server) handleHandshakeInit(ctx context.Context, pkt proto.Packet, addr net.Addr) {
-	// One peer per address. If one already exists, evict it first
+func (s *Server) handleHandshakeInit(
+	ctx context.Context,
+	pkt proto.Packet,
+	addr net.Addr,
+) {
 	if existing, ok := s.Table.LookupAddr(addr); ok {
-		log.Printf("re-handshake from %s, evicting existing peer", addr)
+		log.Printf(
+			"re-handshake from %s, evicting existing peer",
+			addr,
+		)
 		s.Table.Evict(existing)
 	}
 
-	peerCtx, cancel := context.WithCancel(ctx)
+	_, cancel := context.WithCancel(ctx)
+
 	p := peer.NewPeer(addr, cancel)
 	s.Table.Add(p)
 
@@ -68,63 +83,61 @@ func (s *Server) handleHandshakeInit(ctx context.Context, pkt proto.Packet, addr
 		cancel()
 		return
 	}
+
 	p.Handshake = hs
 
 	respPkt, err := hs.HandleInit(pkt)
 	if err != nil {
-		log.Printf("handshake init failed from %s: %v", addr, err)
+		log.Printf(
+			"handshake init failed from %s: %v",
+			addr,
+			err,
+		)
+
 		s.Table.Evict(p)
 		return
 	}
 
-	// Derive session and register peer by ID
 	keys := hs.SessionKeys
+
 	sess, err := session.NewSession(keys)
 	if err != nil {
 		s.Table.Evict(p)
 		return
 	}
 
-	id := peer.PeerID(pkt.Payload)
+	var id peer.PeerID
+	copy(id[:], pkt.Payload)
+
 	p.SetSession(sess, id)
+
 	s.Table.RegisterID(id, p)
 
-	// Send response
-	if err := s.UDP.WritePacket(respPkt, addr); err != nil {
-		log.Printf("handshake resp failed to %s: %v", addr, err)
+	_, network, err := net.ParseCIDR("10.0.0.2/32")
+	if err != nil {
+		log.Printf("parse cidr failed: %v", err)
 		s.Table.Evict(p)
 		return
 	}
 
-	go s.runPeerForwarder(peerCtx, p)
-}
+	s.Router.Add(network, p, 1)
 
-func (s *Server) handleData(pkt proto.Packet, addr net.Addr) {
-	p, ok := s.Table.LookupAddr(addr)
-	if !ok {
-		log.Printf("data from unknown peer %s, dropping", addr)
-		return
-	}
-	p.Touch()
+	if err := s.UDP.WritePacket(respPkt, addr); err != nil {
+		log.Printf(
+			"handshake resp failed to %s: %v",
+			addr,
+			err,
+		)
 
-	sess, ok := p.Session()
-	if !ok {
-		log.Printf("data from peer %s with no session, dropping", addr)
+		s.Table.Evict(p)
 		return
 	}
 
-	plaintextLen := len(pkt.Payload) - constant.NonceSize - constant.TagSize
-
-	aad := crypto.BuildAAD(proto.TypeData, uint16(plaintextLen))
-	plaintext, err := sess.Decrypt(pkt, aad)
-	if err != nil {
-		log.Printf("decrypt failed from %s: %v", addr, err)
-		return
-	}
-
-	if _, err := s.TUN.Write(plaintext); err != nil {
-		log.Printf("tun write failed: %v", err)
-	}
+	log.Printf(
+		"session established with peer=%s addr=%s",
+		p.ID.String(),
+		addr,
+	)
 }
 
 func (s *Server) handleKeepalive(addr net.Addr) {
@@ -147,42 +160,4 @@ func (s *Server) handleClose(addr net.Addr) {
 	log.Printf("peer %s disconnected", addr)
 
 	s.Table.Evict(p)
-}
-
-func (s *Server) runPeerForwarder(ctx context.Context, p *peer.Peer) {
-	defer close(p.Done)
-
-	buf := make([]byte, s.TUN.MTU()+4)
-	for {
-		s.TUN.FD.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-		n, err := s.TUN.Read(buf)
-		if err != nil {
-			if os.IsTimeout(err) {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					continue
-				}
-			}
-			log.Printf("tun read error in peer forwarder: %v", err)
-			return
-		}
-
-		sess, ok := p.Session()
-		if !ok {
-			return
-		}
-
-		aad := crypto.BuildAAD(proto.TypeData, uint16(n))
-		encPkt, err := sess.Encrypt(buf[:n], aad)
-		if err != nil {
-			log.Printf("encrypt failed for peer %s: %v", p.Addr, err)
-			continue
-		}
-
-		if err := s.UDP.WritePacket(encPkt, p.Addr); err != nil {
-			log.Printf("udp write failed to %s: %v", p.Addr, err)
-		}
-	}
 }

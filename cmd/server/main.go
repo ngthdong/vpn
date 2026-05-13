@@ -4,14 +4,23 @@ import (
 	"context"
 	"log"
 	"net"
+	"net/http"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/ngthdong/vpn/internal/constant"
+	"github.com/ngthdong/vpn/internal/event"
+	"github.com/ngthdong/vpn/internal/forward"
+	"github.com/ngthdong/vpn/internal/nat"
 	"github.com/ngthdong/vpn/internal/peer"
+	"github.com/ngthdong/vpn/internal/router"
 	"github.com/ngthdong/vpn/internal/server"
 	"github.com/ngthdong/vpn/internal/transport"
 	"github.com/ngthdong/vpn/internal/tun"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/sync/errgroup"
 )
 
 func main() {
@@ -22,6 +31,48 @@ func main() {
 	)
 	defer cancel()
 
+	// Event bus
+	bus := event.NewBus(256)
+	defer bus.Close()
+
+	// Metrics subscriber
+	metricsCh := bus.Subscribe()
+	go event.RunMetricsSubscriber(ctx, metricsCh)
+
+	// NAT table
+	natTable := nat.NewTable(5 * time.Minute)
+
+	// NAT eviction ticker
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case <-ticker.C:
+				natTable.Evict()
+			}
+		}
+	}()
+
+	// Router
+	rt := &router.Router{}
+
+	// Prometheus endpoint
+	http.Handle("/metrics", promhttp.Handler())
+
+	go func() {
+		log.Println("Prometheus metrics listening on :9090")
+
+		if err := http.ListenAndServe(":9090", nil); err != nil {
+			log.Printf("metrics server error: %v", err)
+		}
+	}()
+
+	// UDP transport
 	conn, err := net.ListenPacket("udp", ":9000")
 	if err != nil {
 		log.Fatalf("failed to listen udp: %v", err)
@@ -30,29 +81,64 @@ func main() {
 
 	log.Println("UDP server listening on :9000")
 
+	udpTransport := transport.NewUDPTransport(conn)
+
+	// TUN device
 	tunDev, err := tun.Open("tun0", constant.MaxPacketSize)
 	if err != nil {
 		log.Fatalf("failed to open tun: %v", err)
 	}
 	defer tunDev.Close()
 
-	log.Printf("TUN device %s opened, MTU=%d",
+	log.Printf(
+		"TUN device %s opened, MTU=%d",
 		tunDev.Name(),
 		tunDev.MTU(),
 	)
 
+	// Peer table + manager
 	table := peer.NewPeerTable()
-	udpTransport := transport.NewUDPTransport(conn)
 
+	manager := peer.NewManager(
+		table,
+		udpTransport,
+	)
+
+	// Data plane
+	fwd := forward.NewForwarder(
+		tunDev,
+		udpTransport,
+		table,
+		rt,
+		natTable,
+		bus,
+		net.ParseIP("10.0.0.1"), // server tunnel IP
+	)
+
+	// Control plane
 	srv := &server.Server{
 		UDP:     udpTransport,
-		TUN:     tunDev,
 		Table:   table,
-		Manager: peer.NewManager(table, udpTransport),
+		Manager: manager,
+		Forwarder: fwd,
+		Router:  rt,
 	}
 
-	if err := srv.Run(ctx); err != nil && err != context.Canceled {
-		log.Fatalf("server exited with error: %v", err)
+	// Run subsystems
+	eg, ctx := errgroup.WithContext(ctx)
+
+	eg.Go(func() error {
+		return srv.Run(ctx)
+	})
+
+	eg.Go(func() error {
+		return fwd.Run(ctx)
+	})
+
+	// Wait for shutdown
+	if err := eg.Wait(); err != nil &&
+		err != context.Canceled {
+		log.Printf("shutdown with error: %v", err)
 	}
 
 	log.Println("server shutdown complete")
