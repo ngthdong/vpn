@@ -1,0 +1,9 @@
+server:
+  address: 38.47.191.198:9000 # replaced with your server's public IP address and port
+
+tun:
+  name: tun1
+  address: 10.0.0.2/24
+
+logging:
+  level: info

@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	config "github.com/ngthdong/vpn/internal/configs"
 	"github.com/ngthdong/vpn/internal/constant"
 	"github.com/ngthdong/vpn/internal/event"
 	"github.com/ngthdong/vpn/internal/forward"
@@ -72,8 +73,13 @@ func main() {
 		}
 	}()
 
-	// UDP transport
-	conn, err := net.ListenPacket("udp", ":9000")
+	// Load configuration
+	cfg, err := config.LoadServer("configs/server.yaml")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	conn, err := net.ListenPacket("udp", cfg.Server.Listen)
 	if err != nil {
 		log.Fatalf("failed to listen udp: %v", err)
 	}
@@ -84,7 +90,11 @@ func main() {
 	udpTransport := transport.NewUDPTransport(conn)
 
 	// TUN device
-	tunDev, err := tun.Open("tun0", constant.MaxPacketSize)
+	tunDev, err := tun.Open(
+		cfg.TUN.Name,
+		cfg.TUN.Address,
+		constant.MaxPacketSize,
+	)
 	if err != nil {
 		log.Fatalf("failed to open tun: %v", err)
 	}
@@ -117,11 +127,11 @@ func main() {
 
 	// Control plane
 	srv := &server.Server{
-		UDP:     udpTransport,
-		Table:   table,
-		Manager: manager,
+		UDP:       udpTransport,
+		Table:     table,
+		Manager:   manager,
 		Forwarder: fwd,
-		Router:  rt,
+		Router:    rt,
 	}
 
 	// Run subsystems

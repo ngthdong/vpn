@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	config "github.com/ngthdong/vpn/internal/configs"
 	"github.com/ngthdong/vpn/internal/constant"
 	"github.com/ngthdong/vpn/internal/event"
 	"github.com/ngthdong/vpn/internal/forward"
@@ -18,6 +19,7 @@ import (
 	"github.com/ngthdong/vpn/internal/proto"
 	"github.com/ngthdong/vpn/internal/router"
 	"github.com/ngthdong/vpn/internal/session"
+	"github.com/ngthdong/vpn/internal/sysroute"
 	"github.com/ngthdong/vpn/internal/transport"
 	"github.com/ngthdong/vpn/internal/tun"
 )
@@ -85,6 +87,11 @@ func handleHandshake(
 }
 
 func main() {
+	cfg, err := config.LoadClient("configs/client.yaml")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	ctx, cancel := signal.NotifyContext(
 		context.Background(),
 		syscall.SIGINT,
@@ -99,7 +106,7 @@ func main() {
 	table := peer.NewPeerTable()
 
 	// UDP transport
-	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	conn, err := net.ListenPacket("udp", "0.0.0.0:0")
 	if err != nil {
 		log.Fatalf("failed to listen udp: %v", err)
 	}
@@ -107,7 +114,7 @@ func main() {
 
 	serverAddr, err := net.ResolveUDPAddr(
 		"udp",
-		"127.0.0.1:9000",
+		cfg.Server.Address,
 	)
 	if err != nil {
 		log.Fatalf("resolve udp addr failed: %v", err)
@@ -128,8 +135,40 @@ func main() {
 
 	log.Println("handshake successful")
 
+	// Default route
+	host, _, err := net.SplitHostPort(cfg.Server.Address)
+	if err != nil {
+		log.Fatalf("invalid server address: %v", err)
+	}
+
+	serverIP := net.ParseIP(host)
+	if serverIP == nil {
+		log.Fatalf("invalid server IP: %s", host)
+	}
+
+	dr, err := sysroute.Setup(
+		cfg.TUN.Name,
+		serverIP,
+	)
+	if err != nil {
+		log.Fatalf("setup system routes: %v", err)
+	}
+	defer func() {
+		if err := sysroute.RestoreDefaultRoute(cfg.TUN.Name, dr); err != nil {
+			log.Printf("restore default route: %v", err)
+		}
+
+		if err := sysroute.DeleteHostRoute(serverIP, dr); err != nil {
+			log.Printf("delete host route: %v", err)
+		}
+	}()
+
 	// TUN device
-	tunDev, err := tun.Open("tun1", constant.MaxPacketSize)
+	tunDev, err := tun.Open(
+		cfg.TUN.Name,
+		cfg.TUN.Address,
+		constant.MaxPacketSize,
+	)
 	if err != nil {
 		log.Fatalf("tun open failed: %v", err)
 	}
@@ -154,6 +193,11 @@ func main() {
 	_, defaultRoute, _ := net.ParseCIDR("0.0.0.0/0")
 	rt.Add(defaultRoute, serverPeer, 100)
 
+	addr, _, err := net.ParseCIDR(cfg.TUN.Address)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// Data plane
 	fwd := forward.NewForwarder(
 		tunDev,
@@ -162,7 +206,7 @@ func main() {
 		rt,
 		natTable,
 		bus,
-		net.ParseIP("10.0.0.2"), 
+		addr,
 	)
 
 	go func() {

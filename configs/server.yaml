@@ -1,0 +1,15 @@
+server:
+  listen: "0.0.0.0:9000"
+
+tun:
+  name: tun0
+  address: 10.0.0.2/24
+
+metrics:
+  listen: ":9090"
+
+nat:
+  ttl: 5m
+
+logging:
+  level: info
