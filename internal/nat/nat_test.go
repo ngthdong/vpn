@@ -14,7 +14,22 @@ func TestIPChecksumRoundtrip(t *testing.T) {
 	pkt[10] = 0xFF
 	pkt[11] = 0xFF
 	recomputeIPChecksum(pkt)
-	if pkt[10] != 0xf4 || pkt[11] != 0x7e {
-		t.Fatalf("wrong checksum: % x", pkt[10:12])
+	if !verifyChecksum(pkt) {
+		t.Fatal("invalid checksum")
 	}
+}
+
+func verifyChecksum(pkt []byte) bool {
+    ihl := int(pkt[0]&0x0F) * 4
+
+    var sum uint32
+    for i := 0; i < ihl; i += 2 {
+        sum += uint32(pkt[i])<<8 | uint32(pkt[i+1])
+    }
+
+    for sum>>16 != 0 {
+        sum = (sum & 0xffff) + (sum >> 16)
+    }
+
+    return uint16(sum) == 0xffff
 }
