@@ -3,7 +3,7 @@ server:
 
 tun:
   name: tun0
-  address: 10.0.0.2/24
+  address: 10.0.0.1/24
 
 metrics:
   listen: ":9090"
