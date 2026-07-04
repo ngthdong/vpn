@@ -122,6 +122,7 @@ func (s *Server) handleHandshakeInit(
 
 	s.Router.Add(network, p, 1)
 
+	log.Println("send reply")
 	if err := s.UDP.WritePacket(respPkt, addr); err != nil {
 		log.Printf(
 			"handshake resp failed to %s: %v",

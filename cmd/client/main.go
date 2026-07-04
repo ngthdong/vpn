@@ -133,7 +133,28 @@ func main() {
 		log.Fatalf("handshake failed: %v", err)
 	}
 
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		log.Fatalf("clear read deadline: %v", err)
+	}
+
 	log.Println("handshake successful")
+
+	// TUN device
+	tunDev, err := tun.Open(
+		cfg.TUN.Name,
+		cfg.TUN.Address,
+		constant.MaxPacketSize,
+	)
+	if err != nil {
+		log.Fatalf("tun open failed: %v", err)
+	}
+	defer tunDev.Close()
+
+	log.Printf(
+		"TUN device %s opened, MTU=%d",
+		tunDev.Name(),
+		tunDev.MTU(),
+	)
 
 	// Default route
 	host, _, err := net.SplitHostPort(cfg.Server.Address)
@@ -162,23 +183,6 @@ func main() {
 			log.Printf("delete host route: %v", err)
 		}
 	}()
-
-	// TUN device
-	tunDev, err := tun.Open(
-		cfg.TUN.Name,
-		cfg.TUN.Address,
-		constant.MaxPacketSize,
-	)
-	if err != nil {
-		log.Fatalf("tun open failed: %v", err)
-	}
-	defer tunDev.Close()
-
-	log.Printf(
-		"TUN device %s opened, MTU=%d",
-		tunDev.Name(),
-		tunDev.MTU(),
-	)
 
 	// Create peer representing server
 	serverPeer := peer.NewPeer(serverAddr, func() {})
@@ -214,6 +218,22 @@ func main() {
 			err != context.Canceled {
 			log.Printf("forwarder error: %v", err)
 			cancel()
+		}
+	}()
+
+	go func() {
+		for {
+			pkt, addr, err := udp.ReadPacket()
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+
+				log.Printf("udp read failed: %v", err)
+				continue
+			}
+
+			fwd.HandlePacket(pkt, addr)
 		}
 	}()
 

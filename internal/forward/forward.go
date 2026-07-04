@@ -53,7 +53,7 @@ func NewForwarder(
 		bus:        bus,
 		tunnelAddr: tunnelAddr,
 		mtu:        tunDevice.MTU(),
-		incoming: make(chan IncomingPacket, 256),
+		incoming: make(chan IncomingPacket, 4096),
 	}
 }
 
@@ -76,6 +76,7 @@ func (f *Forwarder) tunToTunnel(ctx context.Context) error {
 
 		for {
 			n, err := f.tun.Read(buf)
+			log.Printf("TUN read: %d bytes", n) 
 			if err != nil {
 				errCh <- err
 				return
@@ -98,6 +99,7 @@ func (f *Forwarder) tunToTunnel(ctx context.Context) error {
 
 		case pkt := <-bufCh:
 			hdr, err := tun.ParseIPHeader(pkt)
+			log.Printf("TUN read: %d bytes", hdr) 
 			if err != nil {
 				log.Printf("bad IP header, dropping: %v", err)
 				continue
@@ -206,7 +208,7 @@ func (f *Forwarder) tunnelToTUN(ctx context.Context) error {
 					continue
 				}
 			}
-
+			
 			if _, err := f.tun.Write(plaintext); err != nil {
 				log.Printf("tun write failed: %v", err)
 				continue
