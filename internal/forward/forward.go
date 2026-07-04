@@ -8,7 +8,6 @@ import (
 	"github.com/ngthdong/vpn/internal/constant"
 	"github.com/ngthdong/vpn/internal/crypto"
 	"github.com/ngthdong/vpn/internal/event"
-	"github.com/ngthdong/vpn/internal/nat"
 	"github.com/ngthdong/vpn/internal/peer"
 	"github.com/ngthdong/vpn/internal/proto"
 	"github.com/ngthdong/vpn/internal/router"
@@ -27,7 +26,6 @@ type Forwarder struct {
 	udp   *transport.UDPTransport
 	table *peer.PeerTable
 	router *router.Router
-	nat    *nat.Table
 	bus    *event.Bus
 	tunnelAddr net.IP
 	mtu        int
@@ -40,7 +38,6 @@ func NewForwarder(
 	udp *transport.UDPTransport,
 	table *peer.PeerTable,
 	router *router.Router,
-	natTable *nat.Table,
 	bus *event.Bus,
 	tunnelAddr net.IP,
 ) *Forwarder {
@@ -49,7 +46,6 @@ func NewForwarder(
 		udp:        udp,
 		table:      table,
 		router:     router,
-		nat:        natTable,
 		bus:        bus,
 		tunnelAddr: tunnelAddr,
 		mtu:        tunDevice.MTU(),
@@ -109,15 +105,6 @@ func (f *Forwarder) tunToTunnel(ctx context.Context) error {
 			p, ok := f.router.Lookup(hdr.DstIP)
 			if !ok {
 				if hdr.DstIP.IsMulticast() || hdr.DstIP.IsLinkLocalMulticast() {
-					continue
-				}
-			}
-
-			// Optional SNAT
-			if f.nat != nil {
-				pkt, err = f.nat.SNAT(pkt, f.tunnelAddr)
-				if err != nil {
-					log.Printf("SNAT failed: %v", err)
 					continue
 				}
 			}
@@ -199,14 +186,6 @@ func (f *Forwarder) tunnelToTUN(ctx context.Context) error {
 
 				log.Printf("decrypt failed from %s: %v", addr, err)
 				continue
-			}
-
-			if f.nat != nil {
-				plaintext, err = f.nat.DNAT(plaintext)
-				if err != nil {
-					log.Printf("DNAT failed: %v", err)
-					continue
-				}
 			}
 			
 			if _, err := f.tun.Write(plaintext); err != nil {

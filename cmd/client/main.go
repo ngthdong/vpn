@@ -14,7 +14,6 @@ import (
 	"github.com/ngthdong/vpn/internal/event"
 	"github.com/ngthdong/vpn/internal/forward"
 	"github.com/ngthdong/vpn/internal/handshake"
-	"github.com/ngthdong/vpn/internal/nat"
 	"github.com/ngthdong/vpn/internal/peer"
 	"github.com/ngthdong/vpn/internal/proto"
 	"github.com/ngthdong/vpn/internal/router"
@@ -102,7 +101,6 @@ func main() {
 	// Independent subsystems
 	bus := event.NewBus(256)
 	rt := &router.Router{}
-	natTable := nat.NewTable(5 * time.Minute)
 	table := peer.NewPeerTable()
 
 	// UDP transport
@@ -208,7 +206,6 @@ func main() {
 		udp,
 		table,
 		rt,
-		natTable,
 		bus,
 		addr,
 	)

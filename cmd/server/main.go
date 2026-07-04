@@ -13,7 +13,6 @@ import (
 	"github.com/ngthdong/vpn/internal/constant"
 	"github.com/ngthdong/vpn/internal/event"
 	"github.com/ngthdong/vpn/internal/forward"
-	"github.com/ngthdong/vpn/internal/nat"
 	"github.com/ngthdong/vpn/internal/peer"
 	"github.com/ngthdong/vpn/internal/router"
 	"github.com/ngthdong/vpn/internal/server"
@@ -40,10 +39,6 @@ func main() {
 	metricsCh := bus.Subscribe()
 	go event.RunMetricsSubscriber(ctx, metricsCh)
 
-	// NAT table
-	natTable := nat.NewTable(5 * time.Minute)
-
-	// NAT eviction ticker
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
@@ -54,7 +49,6 @@ func main() {
 				return
 
 			case <-ticker.C:
-				natTable.Evict()
 			}
 		}
 	}()
@@ -120,7 +114,6 @@ func main() {
 		udpTransport,
 		table,
 		rt,
-		natTable,
 		bus,
 		net.ParseIP("10.0.0.1"), // server tunnel IP
 	)
