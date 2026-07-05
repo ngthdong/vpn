@@ -6,7 +6,7 @@ A Virtual Private Network implemented in Go. Establishes an encrypted UDP tunnel
 
 ## Demo
 
-<!-- Replace with actual screenshots or terminal recordings -->
+[![Watch the demo](images/thumbnail.webp)](https://www.youtube.com/watch?v=g-09gffKAK8)
 
 **Ping through the VPN tunnel**
 ```
