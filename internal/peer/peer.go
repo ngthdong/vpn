@@ -74,12 +74,32 @@ func (p *Peer) Session() (*session.Session, bool) {
 }
 
 func (p *Peer) Close() {
-	p.mu.Lock()
-	p.state = StateClosed
-	p.mu.Unlock()
-	p.cancel()
-	<-p.Done
+    p.mu.Lock()
+    if p.state == StateClosed {
+        p.mu.Unlock()
+        return
+    }
+
+    p.state = StateClosed
+
+    if p.session != nil {
+        p.session.Destroy()
+        p.session = nil
+    }
+
+    if p.Handshake != nil {
+        p.Handshake.Destroy()
+        p.Handshake = nil
+    }
+
+    cancel := p.cancel
+    p.mu.Unlock()
+    if cancel != nil {
+        cancel()
+    }
+    <-p.Done
 }
+
 
 func (id PeerID) String() string {
 	return hex.EncodeToString(id[:8])

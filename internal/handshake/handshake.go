@@ -97,6 +97,12 @@ func (h *Handshake) HandleResp(pkt proto.Packet) error {
 	return nil
 }
 
+func (h *Handshake) Destroy() {
+    zeroBytes(h.localKP.Private[:])
+    zeroBytes(h.SessionKeys.SendKey[:])
+    zeroBytes(h.SessionKeys.RecvKey[:])
+}
+
 func (h *Handshake) Done() bool {
 	return h.state == StateComplete
 }

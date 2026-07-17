@@ -106,6 +106,9 @@ func (s *Server) handleHandshakeInit(
 		return
 	}
 
+	hs.Destroy()     
+	p.Handshake = nil
+
 	var id peer.PeerID
 	copy(id[:], pkt.Payload)
 

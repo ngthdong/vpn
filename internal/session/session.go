@@ -60,3 +60,8 @@ func (s *Session) Decrypt(pkt proto.Packet, aad []byte) ([]byte, error) {
 
 	return s.recvCipher.Open(nonce, ct, aad)
 }
+
+func (s *Session) Destroy() {
+    s.sendCipher = nil
+    s.recvCipher = nil
+}
